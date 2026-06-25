@@ -29,3 +29,7 @@ yarn-error.log*
 # editor / tooling
 .qodo
 .claude
+
+# prompt / reference notes (local only)
+img-trail.txt
+staggered-card-animation.txt
