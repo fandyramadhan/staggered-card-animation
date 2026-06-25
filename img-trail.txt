@@ -1,0 +1,114 @@
+Create a cursor image trail animation in Next.js where images spawn along the mouse path as the user moves, then fade out. Like a flowing photo trail following the cursor. Use Framer Motion.
+
+CORE IDEA:
+- Track mouse movement on the window.
+- Each time the cursor travels a set DISTANCE since the last spawn, drop a new image at the cursor position.
+- Images cycle in order through a fixed list (8 images), one after another.
+- Each spawned image animates in (fade + scale up), lives for a short LIFETIME, then animates out (fade + scale down) via AnimatePresence.
+- The whole trail layer sits BELOW the page content (low z-index) and ignores pointer events.
+
+CONSTANTS:
+const IMAGES = [ /* 8 image URLs */ ]   // bright / light-themed so dark text stays readable over them
+const WIDTH = 220                       // px, image width
+const HEIGHT = (WIDTH * 9) / 16         // 16:9 ratio
+const DISTANCE = 110                    // px the cursor must travel before the next image spawns
+const LIFETIME = 900                    // ms each trail image stays alive
+
+CORE COMPONENT (client component):
+"use client"
+import { useEffect, useRef, useState } from "react"
+import { AnimatePresence, motion } from "framer-motion"
+
+type TrailItem = { id: number; x: number; y: number; src: string }
+
+export default function ImageTrail() {
+  const [items, setItems] = useState<TrailItem[]>([])
+  const last = useRef({ x: 0, y: 0, set: false })  // last spawn position
+  const imgIndex = useRef(0)                        // which image is next (cycles)
+  const idCounter = useRef(0)                       // unique key per spawned image
+
+  useEffect(() => {
+    function handleMove(e: MouseEvent) {
+      const { clientX: x, clientY: y } = e
+
+      // first move just records the starting point, no spawn
+      if (!last.current.set) {
+        last.current = { x, y, set: true }
+        return
+      }
+
+      // only spawn once the cursor has traveled far enough
+      const dist = Math.hypot(x - last.current.x, y - last.current.y)
+      if (dist < DISTANCE) return
+      last.current = { x, y, set: true }
+
+      const src = IMAGES[imgIndex.current % IMAGES.length]
+      imgIndex.current += 1
+      const id = idCounter.current++
+
+      setItems((prev) => [...prev, { id, x, y, src }])
+      window.setTimeout(() => {
+        setItems((prev) => prev.filter((it) => it.id !== id))
+      }, LIFETIME)
+    }
+
+    window.addEventListener("mousemove", handleMove)
+    return () => window.removeEventListener("mousemove", handleMove)
+  }, [])
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed inset-0 z-[5] overflow-hidden"
+    >
+      <AnimatePresence>
+        {items.map((it) => (
+          <motion.img
+            key={it.id}
+            src={it.src}
+            alt=""
+            initial={{ opacity: 0, scale: 0.5 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.4 }}
+            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+            className="absolute rounded-[14px] object-cover shadow-xl"
+            style={{
+              width: WIDTH,
+              height: HEIGHT,
+              left: it.x - WIDTH / 2,   // center the image on the cursor
+              top: it.y - HEIGHT / 2,
+            }}
+          />
+        ))}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+IMAGE STYLING:
+- 16:9 aspect ratio (height = width * 9/16).
+- border-radius: 14px (rounded-[14px]).
+- object-cover so any source crops cleanly to 16:9.
+- Use bright / light-toned images. Pick them by measuring average luminance and keeping the brightest, so dark foreground text remains readable behind the trail.
+
+Z-INDEX / LAYERING:
+- The trail container is `fixed inset-0 z-[5]`.
+- It must render with a LOWER z-index than the page content (e.g. content wrapper at z-10) so images appear behind the headline / cards / buttons.
+- It can sit above the background (e.g. background shape at z-0).
+- Always `pointer-events-none` so the trail never blocks clicks or hovers.
+
+KEY POINTS:
+- Mouse position is read from clientX/clientY (viewport coords); the fixed inset-0 container makes left/top map 1:1 to those coords.
+- Center each image on the cursor by offsetting left/top by half the width/height (do NOT use a transform translate for centering — Framer Motion drives `transform` for the scale animation and would override it).
+- Spawn is distance-gated (DISTANCE), not time-gated, so the trail density is consistent regardless of cursor speed.
+- Cycle images in order with a ref counter (imgIndex), not random, for an even rotation through all 8.
+- Auto-remove each image after LIFETIME via setTimeout filtering by id; AnimatePresence runs the exit animation.
+- Use refs (last, imgIndex, idCounter) for per-move bookkeeping so updating them does not trigger re-renders.
+- Remove the mousemove listener on unmount.
+
+NOTES:
+- This is a mouse-driven effect; it will not appear on touch devices (no cursor). Add a tap-based fallback if mobile support is needed.
+- Load images from a CDN via plain <img> (motion.img) to avoid next/image domain config.
+
+TECH: Next.js (App Router), TypeScript, Tailwind, Framer Motion
+DO NOT center images with a CSS/transform translate — it conflicts with the Framer Motion scale transform; offset left/top instead.
